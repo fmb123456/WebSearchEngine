@@ -13,6 +13,7 @@ flowchart TD
 
     F --> G[CrawlerAllMetricMeasure]
     H[crawlerdb: url_state_current_* + domain_state] --> G
+    O[selectdb: selected_urls_current] --> G
     G --> I[metric_headset_* / metric_randomset_*]
 
     J[CrawlerStatusMeasure]
@@ -114,6 +115,18 @@ For date range `[today-29, today]`, compute in application loop:
 - 7-day (`delta<7`): sums of fetch and HTTP 404/500
 - 30-day (`delta<30`): sums of fetch and HTTP 404/500
 
+### 3.6a Index status lookup from selectdb
+
+During `CrawlerAllMetricMeasure`, each golden URL's `is_indexed` is determined by checking `selectdb`:
+
+```sql
+SELECT url
+FROM public.selected_urls_current
+WHERE url = ANY(:golden_urls);
+```
+
+URLs found in the result set are marked `is_indexed = True`. This query is batched in chunks of 10,000 URLs.
+
 ### 3.7 Coverage formulas
 
 For each group `G in {Total, A, B}`:
@@ -159,11 +172,14 @@ This ensures idempotent daily reruns.
   - `postgresql+psycopg2://metric:metric@<metric_db_url>/metricdb`
 - Crawler DB URL template:
   - `postgresql+psycopg2://crawler:crawler@<crawler_db_url>/crawlerdb`
+- Select DB URL template:
+  - `postgresql+psycopg2://select:select@<select_db_url>/selectdb`
 
 Cron defaults in Dockerfile currently use:
 
 - `--metric_db_url 172.16.191.1:5433`
 - `--crawler_db_url 172.16.191.1:5432`
+- `--select_db_url 172.16.191.1:5444`
 
 ### 5.3 Migration target URL
 
@@ -171,7 +187,6 @@ Cron defaults in Dockerfile currently use:
 
 ## 6. Important Current Limitations
 
-- Index-related measurements are intentionally out of scope here.
 - `SearchEngineAllMetricMeasure` and `TypesenseRankMeasure` are stubs in active code.
 - `--measure all` has no explicit branch in `measure.py`.
 

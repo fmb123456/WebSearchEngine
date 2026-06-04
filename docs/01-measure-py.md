@@ -21,6 +21,7 @@ It coordinates three layers:
 - `--strategy [random|head]...`: Which golden-set strategy(ies) to run.
 - `--crawler_db_url`: Host:port for crawler PostgreSQL.
 - `--metric_db_url`: Host:port for metric PostgreSQL.
+- `--select_db_url`: Host:port for selectdb PostgreSQL (required for `crawler_all` index coverage).
 - `--create`: Build/update golden sets.
 - `--rawdatareader db`: Read trending raw data via DB-backed reader.
 - `--update <days>`: Raw-data cache TTL in days (default: 14).
@@ -63,6 +64,8 @@ Flow:
 
 - `status`: runs `CrawlerStatusMeasure`.
 - `crawler_all`: for each selected strategy tag (`head`/`random`), runs `CrawlerAllMetricMeasure`.
+  - Queries `selectdb.selected_urls_current` to determine `is_indexed` flag per golden URL.
+  - Without `--select_db_url`, indexed always reports `False`.
 - `rank`: currently no-op in active implementation.
 
 ## 4. DB Initialization
@@ -75,6 +78,7 @@ Effective defaults from `measure.py`:
 
 - Crawler DB credentials: `crawler:crawler`, DB name `crawlerdb`.
 - Metric DB credentials: `metric:metric`, DB name `metricdb`.
+- Select DB credentials: `select:select`, DB name `selectdb`.
 
 ## 5. Key Internal Functions
 
@@ -96,7 +100,7 @@ Responsibilities:
 
 Responsibilities:
 
-- Run measurement classes against crawler + metric DB.
+- Run measurement classes against crawler + metric + select DBs.
 - Persist computed KPI tables via UPSERT.
 
 ## 6. Control Flow Diagram
@@ -105,7 +109,7 @@ Responsibilities:
 flowchart TD
     A[CLI args] --> B{--createtable?}
     B -->|yes| C[Create dynamic metric models + create tables]
-    B -->|no| D[Connect crawlerDB + metricDB]
+    B -->|no| D[Connect crawlerDB + metricDB + selectDB]
     C --> D
 
     D --> E{--create?}
@@ -118,11 +122,12 @@ flowchart TD
     J -->|yes| K{measure contains status/crawler_all}
     K --> L[CrawlerStatusMeasure.test]
     K --> M[CrawlerAllMetricMeasure.test per strategy tag]
+    M --> N[Query selectdb.selected_urls_current for is_indexed]
 ```
 
 ## 7. Operational Notes
 
 - `rank` pathway is not active; do not assume search ranking KPIs are written.
-- `indexed` currently remains `0` in status/coverage flows because index-status source is not wired.
+- `indexed` is now populated from `selectdb.selected_urls_current` when `--select_db_url` is provided.
 - `--measure all` appears in choices but no explicit branch handles it in current code.
 

@@ -1,7 +1,7 @@
 from Metric.Measure.Measure import Measure
 from Database.Database import Database
 from Database.ModelFactory.AppModelFactory import AppModelFactory
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, text
 from sqlalchemy.dialects.postgresql import insert
 from tqdm import tqdm
 import tldextract
@@ -9,12 +9,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 class CrawlerAllMetricMeasure(Measure):
-    def __init__(self, modelFactory: AppModelFactory, crawlerDB: Database, metricDB: Database, batch_id: int, tag: str):
+    def __init__(self, modelFactory: AppModelFactory, crawlerDB: Database, metricDB: Database, selectDB: Database, batch_id: int, tag: str):
         """
         初始化 CrawlerAllMetricMeasure
         :param modelFactory: 模型工廠
         :param crawlerDB: 爬蟲資料庫 (讀取 Shard 狀態)
         :param metricDB: 指標資料庫 (讀取 Golden URL / 寫入覆蓋率)
+        :param selectDB: 選址資料庫 (查詢 selected_urls_current)
         :param batch_id: 指定要評估的 MetricBatch ID
         :param tag: 指定 Metric 標籤 (例如 'head', 'random')，用來篩選 Golden URLs
         """
@@ -22,6 +23,7 @@ class CrawlerAllMetricMeasure(Measure):
         self.modelFactory = modelFactory
         self.crawlerDB: Database = crawlerDB
         self.metricDB: Database = metricDB
+        self.selectDB: Database = selectDB
         self.batch_id = batch_id
         self.tag = tag
         
@@ -60,6 +62,28 @@ class CrawlerAllMetricMeasure(Measure):
                 print("[Error] scan domain_state failed")
 
         return found_map
+
+    def _load_indexed_urls(self, url_tuple):
+        """
+        查詢 SelectDB 的 selected_urls_current，回傳有被選取的 URL 集合
+        """
+        if not url_tuple:
+            return set()
+
+        indexed_set = set()
+        chunk_size = 10000
+
+        with self.selectDB.session() as session:
+            for i in range(0, len(url_tuple), chunk_size):
+                chunk = url_tuple[i:i + chunk_size]
+                stmt = text(
+                    "SELECT url FROM public.selected_urls_current WHERE url = ANY(:urls)"
+                )
+                rows = session.execute(stmt, {"urls": list(chunk)}).fetchall()
+                for row in rows:
+                    indexed_set.add(row[0])
+
+        return indexed_set
 
     def _scan_url_shard(self, shard_ids, url_tuple):
         """
@@ -175,6 +199,14 @@ class CrawlerAllMetricMeasure(Measure):
                         url_status_map[url]['crawled'] = crawled
                         url_status_map[url]['indexed'] = indexed
                         url_status_map[url]['shard_id'] = shard_id
+
+        # 查詢 SelectDB 取得 indexed 狀態
+        if self.selectDB is not None:
+            print(f"🔍 Checking SelectDB for index status ...")
+            indexed_urls = self._load_indexed_urls(url_tuple)
+            for url in indexed_urls:
+                if url in url_status_map:
+                    url_status_map[url]['indexed'] = True
 
         # ==========================================
         # 3. 聚合統計與分組 (Team A / Team B)

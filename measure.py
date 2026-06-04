@@ -47,7 +47,8 @@ def parseArgs():
 
     parser.add_argument("--strategy", nargs='+', choices=['random', 'head'], default=[], help="raw data path")
     parser.add_argument("--crawler_db_url", help="crawler url")
-    parser.add_argument("--metric_db_url", help="crawler url")
+    parser.add_argument("--metric_db_url", help="metric url")
+    parser.add_argument("--select_db_url", help="selectdb url (for index coverage)")
 
     parser.add_argument("--create", action='store_true', help="create dataset")
     parser.add_argument("--rawdatareader", choices=['db'], default='db', help="raw data reader strategy")
@@ -80,7 +81,7 @@ def createDataset(args, modelFactory: AppModelFactory, crawlerDB, metricDB):
         context.setQueryStrategy(HeadQueryStrategy(metricDB, modelFactory, batch_id, rawData, args.keywordNums))
         context.getGoldenSet()
 
-def test(args, modelFactory: AppModelFactory, crawlerDB, metricDB):
+def test(args, modelFactory: AppModelFactory, crawlerDB, metricDB, selectDB):
     context: MeasureContext = MeasureContext()
 
     if 'status' in args.measure:
@@ -89,7 +90,7 @@ def test(args, modelFactory: AppModelFactory, crawlerDB, metricDB):
 
     for tag in args.strategy:
         if 'crawler_all' in args.measure:
-            context.setMeasure(CrawlerAllMetricMeasure(modelFactory, crawlerDB, metricDB, get_latest_batch_id(metricDB, modelFactory), tag))
+            context.setMeasure(CrawlerAllMetricMeasure(modelFactory, crawlerDB, metricDB, selectDB, get_latest_batch_id(metricDB, modelFactory), tag))
             context.test()
 
 def main():
@@ -102,11 +103,12 @@ def main():
     
     crawlerDB = createDB("crawler", "crawler", args.crawler_db_url, "crawlerdb")
     metricDB = createDB("metric", "metric", args.metric_db_url, "metricdb", args.createtable, MetricBase)
+    selectDB = createDB("select", "select", args.select_db_url, "selectdb") if args.select_db_url else None
 
     if args.create:
         createDataset(args, modelFactory, crawlerDB, metricDB)
     if args.test:
-        test(args, modelFactory, crawlerDB, metricDB)
+        test(args, modelFactory, crawlerDB, metricDB, selectDB)
 
 if __name__ == '__main__':
     main()
